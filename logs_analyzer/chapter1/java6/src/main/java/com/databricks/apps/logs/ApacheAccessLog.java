@@ -22,6 +22,7 @@ public class ApacheAccessLog implements Serializable {
   private String protocol;
   private int responseCode;
   private long contentSize;
+  private ApacheAccessLog(){};
 
   private ApacheAccessLog(String ipAddress, String clientIdentd, String userID,
                           String dateTime, String method, String endpoint,
@@ -121,7 +122,7 @@ public class ApacheAccessLog implements Serializable {
     Matcher m = PATTERN.matcher(logline);
     if (!m.find()) {
       logger.log(Level.ALL, "Cannot parse logline" + logline);
-      throw new RuntimeException("Error parsing logline");
+      return new ApacheAccessLog();
     }
 
     return new ApacheAccessLog(m.group(1), m.group(2), m.group(3), m.group(4),

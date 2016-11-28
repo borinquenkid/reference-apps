@@ -1,14 +1,22 @@
 package com.databricks.apps.logs;
 
 import java.io.IOException;
+import java.util.List;
 
-import com.google.common.collect.Iterators;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.VoidFunction;
+import org.apache.spark.api.java.function.VoidFunction2;
+import org.apache.spark.streaming.Time;
 import org.apache.spark.streaming.api.java.JavaDStream;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
+
+import com.ehi.carshare.ApacheHttpLog;
+import com.ehi.carshare.Util;
+import com.google.common.collect.Iterators;
 
 /**
  * The LogAnalyzerAppMain is an sample logs analysis application.  For now,
@@ -44,6 +52,7 @@ public class LogAnalyzerAppMain {
   public static final String LOGS_DIRECTORY = "logs_directory";
   public static final String OUTPUT_HTML_FILE = "output_html_file";
   public static final String CHECKPOINT_DIRECTORY = "checkpoint_directory";
+  public static final String LOGFORMAT = "logformat";
 
   private static final Options THE_OPTIONS = createOptions();
   private static Options createOptions() {
@@ -59,6 +68,8 @@ public class LogAnalyzerAppMain {
         new Option(OUTPUT_HTML_FILE, true, "Where to write output html file"));
     options.addOption(
         new Option(CHECKPOINT_DIRECTORY, true, "The checkpoint directory."));
+    options.addOption(
+            new Option(LOGFORMAT, true, "The logformat."));
     return options;
   }
 
@@ -78,33 +89,54 @@ public class LogAnalyzerAppMain {
     // This methods monitors a directory for new files to read in for streaming.
     JavaDStream<String> logData = jssc.textFileStream(Flags.getInstance().getLogsDirectory());
     
-    JavaDStream<ApacheAccessLog> accessLogsDStream = logData.flatMap(
-        line -> {
-            try {
-                return Iterators.singletonIterator(ApacheAccessLog.parseFromLogLine(line));
-            } catch (IOException e) {
-                return Iterators.emptyIterator();
+//    JavaDStream<ApacheAccessLog> accessLogsDStream = logData.flatMap(
+//        line -> {
+//            try {
+//                return Iterators.singletonIterator(ApacheAccessLog.parseFromLogLine(line));
+//            } catch (IOException e) {
+//                return Iterators.emptyIterator();
+//            }
+//        }
+//    ).cache();
+    
+    JavaDStream<ApacheHttpLog> flatMap = logData.flatMap(
+            line -> {
+                try {
+                    return Iterators.singletonIterator(Util.parseFromLogLine(line));
+                } catch (Exception e) {
+                    return Iterators.emptyIterator();
+                }
             }
-        }
-    ).cache();
+        );
+    flatMap.foreachRDD(new VoidFunction<JavaRDD<ApacheHttpLog>>() {
+		
+		@Override
+		public void call(JavaRDD<ApacheHttpLog> rdd) throws Exception {
+			List<ApacheHttpLog> collect = rdd.collect();
+			for (ApacheHttpLog apacheHttpLog : collect) {
+				System.out.println(apacheHttpLog.toString());
+			}
+			
+		}
+	});
 
-    LogAnalyzerTotal logAnalyzerTotal = new LogAnalyzerTotal();
-    LogAnalyzerWindowed logAnalyzerWindowed = new LogAnalyzerWindowed();
-
-    // Process the DStream which gathers stats for all of time.
-    logAnalyzerTotal.processAccessLogs(accessLogsDStream);
-
-    // Calculate statistics for the last time interval.
-    logAnalyzerWindowed.processAccessLogs(accessLogsDStream);
-
-    // Render the output each time there is a new RDD in the accessLogsDStream.
-    Renderer renderer = new Renderer();
-    accessLogsDStream.foreachRDD(rdd -> {
-      // Call this to output the stats.
-      renderer.render(logAnalyzerTotal.getLogStatistics(),
-          logAnalyzerWindowed.getLogStatistics());
-    });
-
+//    LogAnalyzerTotal logAnalyzerTotal = new LogAnalyzerTotal();
+//    LogAnalyzerWindowed logAnalyzerWindowed = new LogAnalyzerWindowed();
+//
+//    // Process the DStream which gathers stats for all of time.
+//    logAnalyzerTotal.processAccessLogs(accessLogsDStream);
+//
+//    // Calculate statistics for the last time interval.
+//    logAnalyzerWindowed.processAccessLogs(accessLogsDStream);
+//
+//    // Render the output each time there is a new RDD in the accessLogsDStream.
+//    Renderer renderer = new Renderer();
+//    accessLogsDStream.foreachRDD(rdd -> {
+//      // Call this to output the stats.
+//      renderer.render(logAnalyzerTotal.getLogStatistics(),
+//          logAnalyzerWindowed.getLogStatistics());
+//    });
+//
     // Start the streaming server.
     jssc.start();              // Start the computation
     jssc.awaitTermination();   // Wait for the computation to terminate
